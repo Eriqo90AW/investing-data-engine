@@ -1,0 +1,6 @@
+# Local development only. Coolify should load docker-compose.yml without this file.
+services:
+  postgres:
+    ports: ["127.0.0.1:5432:5432"]
+  api:
+    ports: ["127.0.0.1:8000:8000"]

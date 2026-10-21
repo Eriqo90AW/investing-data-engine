@@ -4,12 +4,24 @@ Local FastAPI service with separate explicit extraction and read-only inference 
 
 ## Run locally
 
-1. Install Docker Compose and `uv`.
-2. Copy `.env.example` to `.env`; set `SEC_CONTACT_EMAIL` to a monitored contact address before using the SEC.
-3. Run `docker compose up --build`.
+1. Install Docker Compose.
+2. Copy `.env.example` to `.env`; set a nonempty `POSTGRES_PASSWORD` and set `SEC_CONTACT_EMAIL` to a monitored contact address before using the SEC. Use an alphanumeric database password because Compose embeds it in a connection URL.
+3. Run `docker compose -f docker-compose.yml -f docker-compose.local.yml up --build`.
 4. API docs are at http://127.0.0.1:8000/docs. The service binds only to localhost.
 
-Postgres data persists in named volumes. A one-shot migration service installs the Procrastinate queue schema and the app schema before the API and worker start. The API mounts documents read-only; only the worker may write documents.
+Postgres data persists in named volumes. A one-shot migration service initializes the Procrastinate queue schema if absent and applies the app schema before the API and worker start. Initialization runs in one transaction under a database advisory lock, so failed initialization rolls back and repeated or concurrent deployments do not reinstall existing schemas. Procrastinate version upgrades still require its version-specific migrations. The API mounts documents read-only; only the worker may write documents.
+
+## Deploy on Coolify
+
+Create a Git-backed application from this repository with build pack **Docker Compose**, base directory `/`, and Compose location `/docker-compose.yml`. Load only that file; `docker-compose.local.yml` publishes ports for local development and must not be included in the Coolify deployment. Build and start commands are already defined in the Dockerfile and Compose services.
+
+Set `POSTGRES_PASSWORD` to a long random alphanumeric value before the first deployment. Set `SEC_CONTACT_EMAIL` and optionally `NINEROUTER_API_KEY`. The Compose file supplies the internal database URL to the migration, API, and worker containers. The worker also receives `FINANCIALS_NINEROUTER_BASE_URL` and `FINANCIALS_NINEROUTER_MODEL` from Compose variables or their defaults. Changing the password variable after database initialization does not change the existing PostgreSQL role password; rotate that role and the variable together.
+
+Assign a domain only to the `api` service, targeting internal port `8000`, for example `https://financials.example.com:8000` in Coolify's domain field. Point DNS to the deployment server. Public clients then use `https://financials.example.com` without `:8000`. The base Compose file does not bind PostgreSQL or the API to fixed host ports. The API has no built-in authentication; restrict access through your private network or an authenticated gateway before making it publicly reachable.
+
+Expected startup order is PostgreSQL healthy, migration container exited with code 0, then API and worker running. The completed migration container is expected to stay stopped. The API health check uses Python's standard HTTP client against `/health`; no curl installation is required. Check `/health`, `/docs`, and `/openapi.json` after deploying. Health checks verify database connectivity, not worker readiness or external extraction.
+
+Keep the `postgres-data` and `documents` named volumes across deployments and back them up. The API mounts documents read-only; the worker mounts the same volume read-write. PostgreSQL, API, and worker restart automatically unless explicitly stopped. Deploying the stack does not add extraction capabilities; jobs still fail with `extractor_unavailable` as described below.
 
 ## API
 
