@@ -1,0 +1,47 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: financials
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-financials}
+      POSTGRES_DB: financials
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: ["postgres-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U financials"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  migrate:
+    build: .
+    command: ["sh", "-c", "python -m procrastinate --app=investing_data_engine.queue.app schema --apply && python -m investing_data_engine.migrate"]
+    environment:
+      FINANCIALS_DATABASE_URL: postgresql://financials:${POSTGRES_PASSWORD:-financials}@postgres:5432/financials
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: "no"
+  api:
+    build: .
+    command: ["uvicorn", "investing_data_engine.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      FINANCIALS_DATABASE_URL: postgresql://financials:${POSTGRES_PASSWORD:-financials}@postgres:5432/financials
+      FINANCIALS_DOCUMENT_DIR: /data/documents
+      FINANCIALS_SEC_CONTACT_EMAIL: ${SEC_CONTACT_EMAIL:-}
+    ports: ["127.0.0.1:8000:8000"]
+    volumes: ["documents:/data/documents:ro"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+  worker:
+    build: .
+    command: ["python", "-m", "investing_data_engine.worker"]
+    environment:
+      FINANCIALS_DATABASE_URL: postgresql://financials:${POSTGRES_PASSWORD:-financials}@postgres:5432/financials
+      FINANCIALS_DOCUMENT_DIR: /data/documents
+      FINANCIALS_SEC_CONTACT_EMAIL: ${SEC_CONTACT_EMAIL:-}
+      FINANCIALS_NINEROUTER_API_KEY: ${NINEROUTER_API_KEY:-}
+    volumes: ["documents:/data/documents"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+volumes:
+  postgres-data:
+  documents:
