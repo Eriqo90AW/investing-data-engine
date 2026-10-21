@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
 
 from .api import extraction, inference
 from .db import lifespan_resources
@@ -21,6 +22,7 @@ Read endpoint descriptions, edit example requests with **Try it out**, and click
 **Execute** to send a real request. Swagger displays the generated curl command,
 request URL, response status, headers, and body. Results last for the current visit;
 there is no saved request history or automatic polling.
+Opening `GET /` redirects to this Swagger interface at `/docs`.
 
 ### Workflow
 
@@ -44,6 +46,7 @@ results. The **Server response** shown after Execute is the actual result.
 Executing extraction can enqueue work or create a company entry.
 """,
     openapi_tags=[
+        {"name": "documentation", "description": "Open the interactive API documentation."},
         {"name": "health", "description": "Check the local database connection."},
         {"name": "extraction", "description": "Explicitly request work and read job progress."},
         {"name": "inference", "description": "Read published datasets and stored documents without scheduling work."},
@@ -52,6 +55,30 @@ Executing extraction can enqueue work or create a company entry.
 )
 app.include_router(extraction.router)
 app.include_router(inference.router)
+
+
+@app.get(
+    "/",
+    tags=["documentation"],
+    summary="Open API documentation",
+    description="Redirects the root URL to the Swagger interface at /docs. Does not query the database or start extraction.",
+    response_class=RedirectResponse,
+    status_code=307,
+    responses={
+        307: {
+            "description": "Redirect to the interactive API documentation. Empty response body.",
+            "headers": {
+                "Location": {
+                    "description": "Relative URL of the Swagger interface.",
+                    "schema": {"type": "string"},
+                    "example": "/docs",
+                }
+            },
+        }
+    },
+)
+async def root():
+    return RedirectResponse(url="/docs", status_code=307)
 
 
 @app.get(

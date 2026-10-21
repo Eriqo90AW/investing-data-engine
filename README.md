@@ -7,7 +7,7 @@ Local FastAPI service with separate explicit extraction and read-only inference 
 1. Install Docker Compose.
 2. Copy `.env.example` to `.env`; set a nonempty `POSTGRES_PASSWORD` and set `SEC_CONTACT_EMAIL` to a monitored contact address before using the SEC. Use an alphanumeric database password because Compose embeds it in a connection URL.
 3. Run `docker compose -f docker-compose.yml -f docker-compose.local.yml up --build`.
-4. API docs are at http://127.0.0.1:9090/docs. The API is published on host port `9090`, mapped to container port `8000`.
+4. Open http://127.0.0.1:9090/ to be redirected to the API docs at `/docs`. The API is published on host port `9090`, mapped to container port `8000`.
 
 Postgres data persists in named volumes. A one-shot migration service initializes the Procrastinate queue schema if absent and applies the app schema before the API and worker start. Initialization runs in one transaction under a database advisory lock, so failed initialization rolls back and repeated or concurrent deployments do not reinstall existing schemas. Procrastinate version upgrades still require its version-specific migrations. The API mounts documents read-only; only the worker may write documents.
 
@@ -25,7 +25,7 @@ Keep the `postgres-data` and `documents` named volumes across deployments and ba
 
 ## API
 
-Open [the interactive API documentation](http://127.0.0.1:9090/docs) after starting the service. All seven endpoints are grouped by health, extraction, and inference. Expand an endpoint, click **Try it out**, edit its parameters or JSON body, and click **Execute**. The page shows a curl command and the actual response status, headers, and body. Results last for the current visit; requests and polling are manual. The page uses FastAPI's existing Swagger assets and needs no frontend build.
+Open [the interactive API documentation](http://127.0.0.1:9090/docs) after starting the service. Opening `GET /` returns a `307` redirect to `/docs`. The redirect is documented under documentation; the seven data and health endpoints are grouped by health, extraction, and inference. Expand an endpoint, click **Try it out**, edit its parameters or JSON body, and click **Execute**. The page shows a curl command and the actual response status, headers, and body. Results last for the current visit; requests and polling are manual. The page uses FastAPI's existing Swagger assets and needs no frontend build.
 
 Start with `/health`. For extraction on an empty database, use the example numeric CIK `1018724`; tickers such as `AMZN` require an existing company entry. Copy the returned `job_id` into the job endpoint to poll. The current worker reports `failed` with `extractor_unavailable`. Read financials and breakdowns after a dataset has been published; pin the same `version` for consistent reads. List reports to find IDs for file downloads.
 

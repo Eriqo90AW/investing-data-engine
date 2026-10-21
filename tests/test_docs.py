@@ -30,6 +30,7 @@ def client(monkeypatch):
 def test_all_operations_have_documentation_and_examples():
     schema = app.openapi()
     expected = {
+        "/": "get",
         "/health": "get",
         "/v1/extraction/financials": "post",
         "/v1/extraction/jobs/{job_id}": "get",
@@ -39,12 +40,16 @@ def test_all_operations_have_documentation_and_examples():
         "/v1/inference/reports/{report_id}/download": "get",
     }
     assert set(schema["paths"]) == set(expected)
-    assert {tag["name"] for tag in schema["tags"]} == {"health", "extraction", "inference"}
+    assert {tag["name"] for tag in schema["tags"]} == {"documentation", "health", "extraction", "inference"}
     for path, method in expected.items():
         operation = schema["paths"][path][method]
         assert operation["summary"] and operation["description"] and operation["tags"]
-        success = operation["responses"]["202" if method == "post" else "200"]
-        if path.endswith("/download"):
+        status = "307" if path == "/" else "202" if method == "post" else "200"
+        success = operation["responses"][status]
+        if path == "/":
+            assert "content" not in success
+            assert success["headers"]["Location"]["example"] == "/docs"
+        elif path.endswith("/download"):
             assert "application/json" not in success["content"]
             assert success["content"]["application/pdf"]["schema"]["format"] == "binary"
             assert "Content-Disposition" in success["headers"]
@@ -76,6 +81,21 @@ def test_conditional_read_documentation(kind):
     for status in ("200", "304"):
         assert set(operation["responses"][status]["headers"]) == {"ETag", "Cache-Control"}
     assert {p["name"] for p in operation["parameters"]} == {"identifier", "period", "version", "if-none-match"}
+
+
+def test_root_redirects_to_swagger_without_database(client):
+    http, conn = client
+    redirect = http.get("/", follow_redirects=False)
+    assert redirect.status_code == 307
+    assert redirect.headers["location"] == "/docs"
+    assert redirect.content == b""
+    docs = http.get("/")
+    assert docs.status_code == 200
+    assert docs.url.path == "/docs"
+    assert "SwaggerUIBundle" in docs.text
+    assert http.get("/missing-route", follow_redirects=False).status_code == 404
+    conn.fetchrow.assert_not_awaited()
+    conn.fetchval.assert_not_awaited()
 
 
 def test_docs_and_schema_load_without_database(client):
