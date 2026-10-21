@@ -28,7 +28,7 @@ services:
       FINANCIALS_DATABASE_URL: postgresql://financials:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/financials
       FINANCIALS_DOCUMENT_DIR: /data/documents
       FINANCIALS_SEC_CONTACT_EMAIL: ${SEC_CONTACT_EMAIL:-}
-    expose: ["8000"]
+    ports: ["9090:8000"]
     volumes: ["documents:/data/documents:ro"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).close()"]

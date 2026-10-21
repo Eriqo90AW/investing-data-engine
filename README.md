@@ -7,17 +7,17 @@ Local FastAPI service with separate explicit extraction and read-only inference 
 1. Install Docker Compose.
 2. Copy `.env.example` to `.env`; set a nonempty `POSTGRES_PASSWORD` and set `SEC_CONTACT_EMAIL` to a monitored contact address before using the SEC. Use an alphanumeric database password because Compose embeds it in a connection URL.
 3. Run `docker compose -f docker-compose.yml -f docker-compose.local.yml up --build`.
-4. API docs are at http://127.0.0.1:8000/docs. The service binds only to localhost.
+4. API docs are at http://127.0.0.1:9090/docs. The API is published on host port `9090`, mapped to container port `8000`.
 
 Postgres data persists in named volumes. A one-shot migration service initializes the Procrastinate queue schema if absent and applies the app schema before the API and worker start. Initialization runs in one transaction under a database advisory lock, so failed initialization rolls back and repeated or concurrent deployments do not reinstall existing schemas. Procrastinate version upgrades still require its version-specific migrations. The API mounts documents read-only; only the worker may write documents.
 
 ## Deploy on Coolify
 
-Create a Git-backed application from this repository with build pack **Docker Compose**, base directory `/`, and Compose location `/docker-compose.yml`. Load only that file; `docker-compose.local.yml` publishes ports for local development and must not be included in the Coolify deployment. Build and start commands are already defined in the Dockerfile and Compose services.
+Create a Git-backed application from this repository with build pack **Docker Compose**, base directory `/`, and Compose location `/docker-compose.yml`. Load only that file; `docker-compose.local.yml` additionally publishes PostgreSQL on localhost for local development and must not be included in the Coolify deployment. Build and start commands are already defined in the Dockerfile and Compose services.
 
 Set `POSTGRES_PASSWORD` to a long random alphanumeric value before the first deployment. Set `SEC_CONTACT_EMAIL` and optionally `NINEROUTER_API_KEY`. The Compose file supplies the internal database URL to the migration, API, and worker containers. The worker also receives `FINANCIALS_NINEROUTER_BASE_URL` and `FINANCIALS_NINEROUTER_MODEL` from Compose variables or their defaults. Changing the password variable after database initialization does not change the existing PostgreSQL role password; rotate that role and the variable together.
 
-Assign a domain only to the `api` service, targeting internal port `8000`, for example `https://financials.example.com:8000` in Coolify's domain field. Point DNS to the deployment server. Public clients then use `https://financials.example.com` without `:8000`. The base Compose file does not bind PostgreSQL or the API to fixed host ports. The API has no built-in authentication; restrict access through your private network or an authenticated gateway before making it publicly reachable.
+Assign a domain only to the `api` service, targeting internal port `8000`, for example `https://financials.example.com:8000` in Coolify's domain field. Point DNS to the deployment server. Public clients then use `https://financials.example.com` without `:8000`. The base Compose file publishes the API on host port `9090`, mapped to internal port `8000`; PostgreSQL has no host port mapping. A Cloudflare Tunnel running directly on the server can target `http://127.0.0.1:9090`. A tunnel in a separate Docker bridge network must target the server's reachable IP on port `9090`. The API has no built-in authentication; restrict access through your private network or an authenticated gateway before making it publicly reachable.
 
 Expected startup order is PostgreSQL healthy, migration container exited with code 0, then API and worker running. The completed migration container is expected to stay stopped. The API health check uses Python's standard HTTP client against `/health`; no curl installation is required. Check `/health`, `/docs`, and `/openapi.json` after deploying. Health checks verify database connectivity, not worker readiness or external extraction.
 
@@ -25,7 +25,7 @@ Keep the `postgres-data` and `documents` named volumes across deployments and ba
 
 ## API
 
-Open [the interactive API documentation](http://127.0.0.1:8000/docs) after starting the service. All seven endpoints are grouped by health, extraction, and inference. Expand an endpoint, click **Try it out**, edit its parameters or JSON body, and click **Execute**. The page shows a curl command and the actual response status, headers, and body. Results last for the current visit; requests and polling are manual. The page uses FastAPI's existing Swagger assets and needs no frontend build.
+Open [the interactive API documentation](http://127.0.0.1:9090/docs) after starting the service. All seven endpoints are grouped by health, extraction, and inference. Expand an endpoint, click **Try it out**, edit its parameters or JSON body, and click **Execute**. The page shows a curl command and the actual response status, headers, and body. Results last for the current visit; requests and polling are manual. The page uses FastAPI's existing Swagger assets and needs no frontend build.
 
 Start with `/health`. For extraction on an empty database, use the example numeric CIK `1018724`; tickers such as `AMZN` require an existing company entry. Copy the returned `job_id` into the job endpoint to poll. The current worker reports `failed` with `extractor_unavailable`. Read financials and breakdowns after a dataset has been published; pin the same `version` for consistent reads. List reports to find IDs for file downloads.
 
