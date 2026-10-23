@@ -1,6 +1,6 @@
 # Company financials engine
 
-Local FastAPI service with separate explicit extraction and read-only inference APIs. Inference reads only PostgreSQL and never starts background work. The initial service foundation is present; verified issuer/SEC extraction adapters and acceptance fixtures are not included yet, so extraction jobs currently fail explicitly instead of publishing fabricated data.
+Local FastAPI service with separate explicit extraction and read-only inference APIs. Inference reads only PostgreSQL and never starts background work. Explicit worker jobs retrieve SEC US GAAP financials, source filings, and Yahoo daily history. Inference remains read-only. Unsupported disclosures and ambiguous document tables are reported as coverage gaps.
 
 ## Run locally
 
@@ -21,13 +21,13 @@ Assign a domain only to the `api` service, targeting internal port `8000`, for e
 
 Expected startup order is PostgreSQL healthy, migration container exited with code 0, then API and worker running. The completed migration container is expected to stay stopped. The API health check uses Python's standard HTTP client against `/health`; no curl installation is required. Check `/health`, `/docs`, and `/openapi.json` after deploying. Health checks verify database connectivity, not worker readiness or external extraction.
 
-Keep the `postgres-data` and `documents` named volumes across deployments and back them up. The API mounts documents read-only; the worker mounts the same volume read-write. PostgreSQL, API, and worker restart automatically unless explicitly stopped. Deploying the stack does not add extraction capabilities; jobs still fail with `extractor_unavailable` as described below.
+Keep the `postgres-data` and `documents` named volumes across deployments and back them up. The API mounts documents read-only; the worker mounts the same volume read-write. PostgreSQL, API, and worker restart automatically unless explicitly stopped. The worker image includes extraction dependencies, Chromium, and Tesseract. Set SEC_CONTACT_EMAIL before source retrieval.
 
 ## API
 
-Open [the interactive API documentation](http://127.0.0.1:9090/docs) after starting the service. Opening `GET /` returns a `307` redirect to `/docs`. The redirect is documented under documentation; the seven data and health endpoints are grouped by health, extraction, and inference. Expand an endpoint, click **Try it out**, edit its parameters or JSON body, and click **Execute**. The page shows a curl command and the actual response status, headers, and body. Results last for the current visit; requests and polling are manual. The page uses FastAPI's existing Swagger assets and needs no frontend build.
+Open [the interactive API documentation](http://127.0.0.1:9090/docs) after starting the service. Opening `GET /` returns a `307` redirect to `/docs`. The redirect is documented under documentation; the data and health endpoints are grouped by health, extraction, and inference. Expand an endpoint, click **Try it out**, edit its parameters or JSON body, and click **Execute**. The page shows a curl command and the actual response status, headers, and body. Results last for the current visit; requests and polling are manual. The page uses FastAPI's existing Swagger assets and needs no frontend build.
 
-Start with `/health`. For extraction on an empty database, use the example numeric CIK `1018724`; tickers such as `AMZN` require an existing company entry. Copy the returned `job_id` into the job endpoint to poll. The current worker reports `failed` with `extractor_unavailable`. Read financials and breakdowns after a dataset has been published; pin the same `version` for consistent reads. List reports to find IDs for file downloads.
+Start with `/health`. For extraction on an empty database, use the example numeric CIK `1018724`; tickers such as `AMZN` require an existing company entry. Copy the returned `job_id` into the job endpoint to poll. The worker reports progress, then publishes a complete or partial dataset, or returns a source/configuration error without replacing existing data. Read financials and breakdowns after a dataset has been published; pin the same `version` for consistent reads. List reports to find IDs for file downloads.
 
 Response examples are illustrative, not retrieved financial results. The **Server response** after Execute is live. Executing extraction can create a company entry and enqueue work. The generated contract is available at `/openapi.json`. Keep endpoint descriptions and examples current during development as required by `AGENTS.md`.
 
@@ -43,9 +43,26 @@ Inference defaults to the latest period stored in the selected dataset. It repor
 
 `SEC_CONTACT_EMAIL` is required before SEC retrieval. `NINEROUTER_API_KEY` is read by extraction workers only; `FINANCIALS_NINEROUTER_BASE_URL` defaults to `https://api.ercloud.site/v1`, model to `go-free`. Keep secrets in `.env`, which is gitignored. Never place secrets in API payloads or logs.
 
+## Research workflow
+
+- `POST /v1/extraction/financials` now resolves new tickers through the SEC directory during explicit retrieval. The optional `lookback: {"annual": 5, "quarterly": 12}` selects recent completed fiscal periods and cannot be combined with explicit `periods`.
+- `GET /v1/inference/companies?query=AMZN` searches stored company identities only.
+- `POST /v1/extraction/market-data` accepts `{"identifier":"AMZN","refresh":false}`. It requests five years of daily Yahoo history through yfinance. Use only for personal research; Yahoo/yfinance availability and rate limits can interrupt retrieval.
+- `GET /v1/inference/companies/AMZN/market-data` reads the stored snapshot, supports inclusive `start` and `end`, exact `version`, and conditional ETags.
+- Financials and breakdowns return `available_periods` for their publication. Request the same version across both endpoints. Price versions are independent.
+- Jobs expose `kind`, `published_datasets`, and `published_market_data`. Check progress manually. No GET triggers discovery or extraction.
+
+Financial statements preserve source units and exact reporting dates. Monetary YTD flows can produce standalone quarters only through explicit compatible differences with both input sources attached. EPS is never subtracted. Source evidence includes accession, filing location, parser, document hash and stored report ID when available.
+
+Source documents are retrieved over bounded, identified HTTPS requests. Inline XBRL preserves disclosed segment dimensions; HTML and PDF adapters require explicit unit, scale, period and metric labels. OCR candidates require independent corroboration. Browser rendering is restricted to verified hosts and is never used to bypass source access blocks. Issuer fallbacks are configured for AMZN, MSFT, NVDA, JPM and WMT. Unsupported layouts stay unavailable.
+
 ## Limitations
 
-This bootstrap does not yet discover SEC filings, run Arelle/HTML/PDF/OCR/browser extraction, call 9router, implement atomic validated publication, or populate companies. Those must be delivered with fixture-backed verification before financial results are relied on. Browser downloads must use allow-listed source hosts and disable redirects or revalidate each redirect target. No recurring refresh or eviction is configured.
+This release supports the mapped domestic US GAAP concepts in 10-K/10-Q filings. It does not claim universal issuer, IFRS, foreign-filer, PDF or OCR coverage. Ambiguous custom concepts and combined dimension contexts are excluded. Document fallback hosts are explicitly listed; adding a new issuer requires tests and host review.
+
+No recurring refresh, automatic polling, live quote streaming, trading, eviction or paid data service is configured. 9router settings remain optional configuration and are not used to manufacture financial values. Existing datasets remain readable when stale or after a failed refresh.
+
+API health checks test PostgreSQL connectivity only, not provider availability, worker readiness, browser installation or OCR installation. The test suite uses illustrative fixtures and mocked database connections. Recorded acceptance fixtures cover real fiscal-2025 SEC totals for AMZN, MSFT, NVDA, JPM and WMT. Deployment acceptance must additionally run migrations against PostgreSQL and verify the deployed worker. Native OCR tests can use FINANCIALS_OCR_TESSDATA_DIR pointing to installed Tesseract English language data; the container installs Tesseract itself.
 
 ## Documentation checks
 

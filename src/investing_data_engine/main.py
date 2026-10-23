@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 
-from .api import extraction, inference
+from .api import extraction, inference, market
 from .db import lifespan_resources
 from .workers import tasks  # noqa: F401 - register extraction task
 
@@ -27,7 +27,7 @@ Opening `GET /` redirects to this Swagger interface at `/docs`.
 ### Workflow
 
 1. Check `GET /health` for local database connectivity.
-2. Call `POST /v1/extraction/financials` with a stored ticker or numeric SEC CIK.
+2. Call `POST /v1/extraction/financials` with a ticker or numeric SEC CIK.
    A `202` response includes a `status_url`; `200 already_fresh` means stored data
    already covers the request.
 3. Copy the job ID into `GET /v1/extraction/jobs/{job_id}` and execute again to poll.
@@ -36,10 +36,11 @@ Opening `GET /` redirects to this Swagger interface at `/docs`.
 
 ### Current limitation
 
-The extraction worker has no verified source adapter. Accepted jobs currently end
-with `status: failed` and `extractor_unavailable`. A new database has no tickers or
-published financials; a numeric CIK can create a company entry for extraction.
-Inference returns explicit missing-data errors until data has been published.
+The worker retrieves SEC financials and filing evidence, and Yahoo daily price history.
+Configure SEC_CONTACT_EMAIL before retrieval. Unsupported concepts, document table
+candidates without corroboration, and unavailable periods remain explicit gaps.
+Financial and market-data jobs are independent; a failed refresh preserves prior data.
+Company search and every inference GET read stored data only.
 
 All documented response examples are **illustrative**, not retrieved financial
 results. The **Server response** shown after Execute is the actual result.
@@ -55,6 +56,7 @@ Executing extraction can enqueue work or create a company entry.
 )
 app.include_router(extraction.router)
 app.include_router(inference.router)
+app.include_router(market.router)
 
 
 @app.get(

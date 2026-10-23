@@ -34,7 +34,7 @@ def database(monkeypatch):
 )
 async def test_initializes_only_missing_schemas(database, queue_exists, app_applied):
     conn, transaction, events, connect = database
-    conn.fetchval.side_effect = [queue_exists, app_applied]
+    conn.fetchval.side_effect = [queue_exists, app_applied, 1]
 
     await migrate.main()
 
@@ -46,7 +46,7 @@ async def test_initializes_only_missing_schemas(database, queue_exists, app_appl
         i for i, event in enumerate(calls)
         if event[0] == "execute" and event.args[0].startswith("CREATE TABLE IF NOT EXISTS schema_migrations")
     )
-    tracking_queried = calls.index(call.fetchval("SELECT 1 FROM schema_migrations WHERE version='001_initial'"))
+    tracking_queried = calls.index(call.fetchval("SELECT 1 FROM schema_migrations WHERE version=$1", "001_initial"))
     assert tracking_created < tracking_queried
     statements = [event.args[0] for event in conn.execute.await_args_list]
     queue_sql = migrate.SchemaManager.get_schema()
@@ -61,7 +61,7 @@ async def test_initializes_only_missing_schemas(database, queue_exists, app_appl
 
 async def test_redeploy_preserves_existing_queue_and_application_tables(database):
     conn, transaction, _, _ = database
-    conn.fetchval.side_effect = [False, None, True, 1]
+    conn.fetchval.side_effect = [False, None, None, True, 1, 1]
     await migrate.main()
     first_boot_statements = conn.execute.await_count
 

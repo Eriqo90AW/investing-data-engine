@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     ninerouter_base_url: str = "https://api.ercloud.site/v1"
     ninerouter_model: str = "go-free"
     extraction_timeout_seconds: int = 900
+    ocr_tessdata_dir: Path | None = None
 
 
 @lru_cache

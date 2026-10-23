@@ -10,6 +10,7 @@ import asyncpg
 
 from ..config import get_settings
 from ..db import get_pool
+from ..schemas import FinancialsResponse, BreakdownsResponse
 
 router = APIRouter(prefix="/v1/inference", tags=["inference"])
 
@@ -104,8 +105,8 @@ def _payload(value):
 
 
 @router.get(
-    "/companies/{identifier}/financials", summary="Read published financials",
-    description=READ_DESCRIPTION + "\nlatest_stored_period is the greatest stored period_end date, not a YYYY-QN label. completeness is stored dataset metadata.",
+    "/companies/{identifier}/financials", response_model=FinancialsResponse, response_model_exclude_unset=True, summary="Read published financials",
+    description=READ_DESCRIPTION + "\nlatest_stored_period is the greatest stored period_end date, not a YYYY-QN label. available_periods lists selectable periods for this publication. Each period has named income, balance and cash_flow statement arrays with canonical concepts and evidence. completeness is stored coverage metadata.",
     responses={
         200: {"description": "Published financials; requested periods may be missing. Illustrative response.", "headers": CACHE_HEADERS,
               "content": {"application/json": {"example": {**DATASET_EXAMPLE, "completeness": {}, "latest_stored_period": "2025-09-30"}}}},
@@ -125,20 +126,20 @@ async def financials(response: Response,
         row = await _published(conn, company["id"], version)
     payload = _payload(row["financials_payload"])
     selected, missing = _select(payload, period)
-    tag = _etag(row["dataset_version"], period, "financials")
+    stale = row["stale_after"] < datetime.now(timezone.utc)
+    tag = _etag(row["dataset_version"], period, "financials:stale" if stale else "financials:fresh")
     if if_none_match == tag:
         return Response(status_code=304, headers={"ETag": tag, "Cache-Control": "no-cache"})
     response.headers["ETag"] = tag
     response.headers["Cache-Control"] = "no-cache"
-    stale = row["stale_after"] < datetime.now(timezone.utc)
     return {"company": {k: company[k] for k in ("ticker", "cik", "name")}, "dataset_version": row["dataset_version"],
             "source_checked_at": row["source_checked_at"], "published_at": row["published_at"], "stale": stale,
-            "completeness": payload.get("completeness", {}), "periods": selected, "missing_periods": missing,
+            "available_periods": _available(payload), "completeness": payload.get("completeness", {}), "periods": selected, "missing_periods": missing,
             "latest_stored_period": max((p.get("period_end", "") for p in payload.get("periods", [])), default=None)}
 
 
 @router.get(
-    "/companies/{identifier}/breakdowns", summary="Read published revenue and profit breakdowns",
+    "/companies/{identifier}/breakdowns", response_model=BreakdownsResponse, response_model_exclude_unset=True, summary="Read published revenue and profit breakdowns",
     description=READ_DESCRIPTION + "\nReturns stored segment, product/service, or geographic breakdowns when available; no missing profit is inferred.",
     responses={
         200: {"description": "Published breakdowns; requested periods may be missing. Illustrative response.", "headers": CACHE_HEADERS,
@@ -159,14 +160,15 @@ async def breakdowns(response: Response,
         row = await _published(conn, company["id"], version)
     payload = _payload(row["breakdowns_payload"])
     selected, missing = _select(payload, period)
-    tag = _etag(row["dataset_version"], period, "breakdowns")
+    stale = row["stale_after"] < datetime.now(timezone.utc)
+    tag = _etag(row["dataset_version"], period, "breakdowns:stale" if stale else "breakdowns:fresh")
     if if_none_match == tag:
         return Response(status_code=304, headers={"ETag": tag, "Cache-Control": "no-cache"})
     response.headers["ETag"] = tag
     response.headers["Cache-Control"] = "no-cache"
     return {"company": {k: company[k] for k in ("ticker", "cik", "name")}, "dataset_version": row["dataset_version"],
             "source_checked_at": row["source_checked_at"], "published_at": row["published_at"],
-            "stale": row["stale_after"] < datetime.now(timezone.utc), "periods": selected, "missing_periods": missing}
+            "available_periods": _available(payload), "stale": stale, "periods": selected, "missing_periods": missing}
 
 
 @router.get(
@@ -219,3 +221,7 @@ async def download_report(report_id: int = ApiPath(description="Numeric id from 
 
 
 
+
+
+def _available(payload):
+    return [{k: p[k] for k in ("period", "period_end", "period_start", "period_kind") if k in p} for p in payload.get("periods", [])]

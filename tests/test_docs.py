@@ -32,6 +32,9 @@ def test_all_operations_have_documentation_and_examples():
     expected = {
         "/": "get",
         "/health": "get",
+        "/v1/inference/companies": "get",
+        "/v1/inference/companies/{identifier}/market-data": "get",
+        "/v1/extraction/market-data": "post",
         "/v1/extraction/financials": "post",
         "/v1/extraction/jobs/{job_id}": "get",
         "/v1/inference/companies/{identifier}/financials": "get",
@@ -71,7 +74,7 @@ def test_extraction_examples_match_models_and_status_contract():
     examples = schema["paths"]["/v1/extraction/jobs/{job_id}"]["get"]["responses"]["200"]["content"]["application/json"]["examples"]
     for example in examples.values():
         JobResponse.model_validate(example["value"])
-    assert examples["failed"]["value"]["errors"][0]["code"] == "extractor_unavailable"
+    assert examples["failed"]["value"]["errors"][0]["code"] == "sec_contact_required"
 
 
 @pytest.mark.parametrize("kind", ["financials", "breakdowns"])
@@ -106,7 +109,7 @@ def test_docs_and_schema_load_without_database(client):
     assert "swagger-ui-dist" in docs.text
     response = http.get("/openapi.json")
     assert response.status_code == 200
-    assert "extractor_unavailable" in response.json()["info"]["description"]
+    assert "SEC_CONTACT_EMAIL" in response.json()["info"]["description"]
     conn.fetchrow.assert_not_awaited()
     conn.fetchval.assert_not_awaited()
 
