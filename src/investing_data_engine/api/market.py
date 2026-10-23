@@ -22,7 +22,7 @@ async def companies(query: str = Query(default="", max_length=80, description="T
 
 @router.get("/companies/{identifier}/market-data", response_model=MarketResponse,
     summary="Read stored daily price history",
-    description=READ_DESCRIPTION + "\nYahoo daily OHLC with explicit adjustment metadata, corporate actions, source timezone, and coverage. No live quote feed. Date bounds are inclusive.",
+    description=READ_DESCRIPTION + "\nYahoo daily OHLC with explicit adjustment metadata, corporate actions, source timezone, and coverage. The optional root ticker preserves the provider identifier stored by the worker. No live quote feed. Date bounds are inclusive.",
     responses={200: {"description": "Stored daily bars. Illustrative empty bar selection.", "headers": CACHE_HEADERS,
                      "content": {"application/json": {"example": {"company": {"ticker": "AMZN", "cik": "0001018724", "name": "Amazon"},
                      "dataset_version": "illustrative-v1", "source_checked_at": "2026-01-15T00:00:00Z", "published_at": "2026-01-15T00:00:00Z",

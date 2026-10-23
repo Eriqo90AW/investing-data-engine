@@ -167,6 +167,7 @@ class PriceBar(StrictModel):
 
 
 class MarketResponse(StrictModel):
+    ticker: str | None = Field(default=None, description="Provider ticker stored with the price snapshot. Company identity remains available under company.")
     company: Company
     dataset_version: str
     source_checked_at: datetime

@@ -42,7 +42,7 @@ async def request_financials(request: ExtractionRequest, response: Response, poo
 
 
 @router.post("/market-data", response_model=ExtractionAccepted, status_code=202, summary="Request daily price retrieval",
-    description="Explicitly enqueue five years of Yahoo daily history, reuse an identical active job, or return a fresh snapshot. No paid key is required. Source failures appear on the job. Examples are illustrative.",
+    description="Explicitly enqueue five years of Yahoo daily history, reuse an identical active job, or return a fresh snapshot. No paid key is required. Source and response-schema validation failures appear on the job without replacing prior publications. Snapshots are validated against the read response before publication. Examples are illustrative.",
     responses={202: {"description": "Daily retrieval queued.", "content": {"application/json": {"example": {"status": "accepted", "job_id": "2", "status_url": "/v1/extraction/jobs/2", "dataset_versions": []}}}},
                200: {"description": "Stored snapshot remains fresh.", "content": {"application/json": {"example": {"status": "already_fresh", "job_id": None, "status_url": None, "dataset_versions": ["illustrative-price-v1"]}}}}, 404: {"description": "Company could not be resolved."}, 503: {"description": "SEC directory unavailable or contact configuration missing."}})
 async def request_market(request: MarketExtractionRequest, response: Response):

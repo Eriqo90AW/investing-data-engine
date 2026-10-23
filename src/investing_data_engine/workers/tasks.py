@@ -14,7 +14,7 @@ from ..services.documents import inline_breakdowns, table_candidates, browser_do
 from ..services.fallbacks import html_facts, pdf_facts, merge_verified
 from ..services.financials import METRICS
 from ..services.market import retrieve_market
-from ..schemas import FinancialPeriod, BreakdownPeriod
+from ..schemas import FinancialPeriod, BreakdownPeriod, MarketResponse
 
 
 def decoded(value):
@@ -123,6 +123,10 @@ async def execute_job(job_id):
         if job["kind"] == "market-data":
             await progress(job_id, "Yahoo daily prices")
             payload = await asyncio.to_thread(retrieve_market, company["ticker"])
+            MarketResponse.model_validate({**payload,
+                "company": {key: company[key] for key in ("ticker", "cik", "name")},
+                "dataset_version": version, "source_checked_at": now,
+                "published_at": now, "stale": False})
             async with pool.acquire() as conn:
                 async with conn.transaction():
                     await conn.execute("""INSERT INTO market_snapshots(company_id,extraction_job_id,dataset_version,source_checked_at,stale_after,payload)

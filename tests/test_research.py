@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from investing_data_engine import db
 from investing_data_engine.main import app
 from investing_data_engine.schemas import ExtractionRequest, FinancialPeriod
+from investing_data_engine.services.market import retrieve_market
 from investing_data_engine.services.financials import normalize_companyfacts
 from investing_data_engine.services.fallbacks import verified_table, merge_verified
 from investing_data_engine.services.documents import inline_breakdowns
@@ -97,13 +98,25 @@ def test_inline_segment_extraction_preserves_period_unit_and_profit_measure():
     assert items[0]["profit"]["value"]=="20000000"
 
 @pytest.fixture
-def market_client(monkeypatch):
+def market_payload(monkeypatch):
+    import pandas as pd
+    import yfinance as yf
+    history = pd.DataFrame({"Open": [9, 10], "High": [11, 12], "Low": [8, 9],
+        "Close": [10, 11], "Volume": [100, 120], "Adj Close": [9.5, 10.5],
+        "Dividends": [0, 0.25], "Stock Splits": [0, 0]},
+        index=pd.to_datetime(["2025-01-02", "2025-01-03"], utc=True))
+    monkeypatch.setattr(yf, "Ticker", lambda ticker: SimpleNamespace(
+        history=lambda **kwargs: history,
+        history_metadata={"currency": "USD", "exchangeTimezoneName": "America/New_York"}))
+    return retrieve_market("AMZN")
+
+
+@pytest.fixture
+def market_client(monkeypatch, market_payload):
     now=datetime.now(timezone.utc)
     company={"id":1,"ticker":"AMZN","cik":"0001018724","name":"Illustrative company"}
     snapshot={"dataset_version":"price-v1","source_checked_at":now,"published_at":now,"stale_after":now-timedelta(hours=1),
-      "payload":json.dumps({"provider":"fixture","currency":"USD","timezone":"America/New_York","adjustment":"fixture",
-        "coverage_start":"2025-01-01","coverage_end":"2025-01-03",
-        "bars":[{"time":"2025-01-02","open":9,"high":11,"low":8,"close":10,"volume":100},{"time":"2025-01-03","open":10,"high":12,"low":9,"close":11,"volume":120}]})}
+      "payload":json.dumps(market_payload)}
     conn=SimpleNamespace(fetchrow=AsyncMock(side_effect=lambda sql,*args:company if "FROM companies" in sql else snapshot),fetch=AsyncMock(return_value=[]))
     @asynccontextmanager
     async def acquire():
@@ -116,7 +129,11 @@ def test_stored_market_reads_are_conditional_and_bounded(market_client):
     url="/v1/inference/companies/AMZN/market-data?start=2025-01-03"
     result=client.get(url)
     assert result.status_code==200 and result.json()["stale"]
+    assert result.json()["ticker"]=="AMZN"
     assert len(result.json()["bars"])==1
+    assert result.json()["source_url"] == "https://finance.yahoo.com/quote/AMZN/history/"
+    assert result.json()["bars"][0]["adjusted_close"] == 10.5
+    assert result.json()["bars"][0]["dividend"] == 0.25
     unchanged=client.get(url,headers={"If-None-Match":result.headers["etag"]})
     assert unchanged.status_code==304 and unchanged.content==b""
     assert client.get("/v1/inference/companies/AMZN/market-data?start=2025-02-01&end=2025-01-01").status_code==422
@@ -141,7 +158,8 @@ async def test_worker_source_failure_preserves_prior_publication(monkeypatch):
     assert not any("INSERT INTO market_snapshots" in sql or "DELETE" in sql for sql in statements)
     assert "status='failed'" in statements[-1]
 
-async def test_worker_market_publication_and_terminal_job_are_atomic(monkeypatch):
+@pytest.mark.parametrize("invalid", [False, True])
+async def test_worker_market_publication_and_terminal_job_are_atomic(monkeypatch, market_payload, invalid):
     job={"id":1,"company_id":1,"status":"queued","kind":"market-data"}
     company={"id":1,"ticker":"AMZN","cik":"0001018724","name":"Fixture"}
     conn=SimpleNamespace(fetchrow=AsyncMock(side_effect=[job,company]),execute=AsyncMock())
@@ -156,12 +174,18 @@ async def test_worker_market_publication_and_terminal_job_are_atomic(monkeypatch
         yield conn
     conn.transaction=transaction
     monkeypatch.setattr(tasks,"get_pool",lambda:SimpleNamespace(acquire=acquire))
-    monkeypatch.setattr(tasks,"retrieve_market",lambda ticker:{"bars":[]})
+    payload = {**market_payload, "unexpected_field": True} if invalid else market_payload
+    monkeypatch.setattr(tasks,"retrieve_market",lambda ticker:payload)
     await tasks.execute_job(1)
     statements=[call.args[0] for call in conn.execute.await_args_list]
-    assert any("INSERT INTO market_snapshots" in sql for sql in statements)
-    assert "status='published'" in statements[-1]
-    assert transactions==["begin","commit","begin","commit"]
+    if invalid:
+        assert not any("INSERT INTO market_snapshots" in sql for sql in statements)
+        assert "status='failed'" in statements[-1]
+        assert transactions == ["begin", "commit"]
+    else:
+        assert any("INSERT INTO market_snapshots" in sql for sql in statements)
+        assert "status='published'" in statements[-1]
+        assert transactions==["begin","commit","begin","commit"]
 
 
 def test_etag_invalidates_when_snapshot_becomes_stale(market_client):
